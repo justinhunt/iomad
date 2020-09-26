@@ -123,6 +123,12 @@ class block_iomad_company_admin extends block_base {
     public function get_content() {
         global $OUTPUT, $CFG, $SESSION, $USER;
 
+//POODLL NET only admins see ths block
+$context = context_system::instance();
+if(!has_capability
+('block/poodllclassroom:manageintegration',$context)){
+return null;
+}
         // Deal with Access approval notifications.
         require_once($CFG->dirroot . '/blocks/iomad_approve_access/lib.php');
         if (approve_enrol_has_users() && empty($SESSION->approveaccesswarningshown)) {
