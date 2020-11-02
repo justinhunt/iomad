@@ -152,7 +152,7 @@ class observer {
 
             // Generate correct filename (same as certificate mod's view.php does)
             $certname = rtrim($certificate->name, '.');
-            $filename = clean_filename("$certname.pdf");
+            $filename = clean_filename(format_string($certname) . ".pdf");
 
             // Create the certificate content (always create new so it's up to date)
             $content = self::create_certificate($certificate, $user, $cm, $course, $certissue);
@@ -224,9 +224,9 @@ class observer {
                                                                    AND gi.courseid = :courseid)
                                          WHERE gg.userid = :userid", array('courseid' => $courseid,
                                                                            'userid' => $userid))) {
-            $finalscore = $graderec->finalgrade / $graderec->rawgrademax * 100;
+            $finalgrade = $graderec->finalgrade;
         } else {
-            $finalscore = 0;
+            $finalgrade = 0;
         }
 
         // Is the record broken?
@@ -282,7 +282,11 @@ class observer {
             $completion->timeenrolled = $enrolrec->timestart;
             $completion->timestarted = $comprec->timestarted;
             $completion->timecompleted = $comprec->timecompleted;
-            $completion->finalscore = $finalscore;
+            if (!empty($graderec->finalgrade)) {
+                $completion->finalscore = $graderec->finalgrade;
+            } else {
+                $completion->finalscore = 0;
+            }
             $completion->coursename = $courserec->fullname;
             $completion->companyid = $companyrec->id;
             $completion->companyname = $companyrec->name;
@@ -302,7 +306,11 @@ class observer {
             $trackid = $DB->insert_record('local_iomad_track', $completion);
         } else {
             $current->timecompleted = $comprec->timecompleted;
-            $current->finalscore = $finalscore;
+            if (!empty($graderec->finalgrade)) {
+                $current->finalscore = $graderec->finalgrade;
+            } else {
+                $current->finalscore = 0;
+            }
             $broken = false;
             if (empty($current->timeenrolled)) {
                 if (empty($comprec->timeenrolled)) {
@@ -665,7 +673,7 @@ class observer {
         $finalgrade = $event->other['finalgrade'];
 
         // If this isn't a course, we don't care.
-        if (!$graderec = $DB->get_record('grade_items', array('id' => $itemid, 'itemtype' => 'course'))) {
+        if (!$DB->get_record('grade_items', array('id' => $itemid, 'itemtype' => 'course'))) {
             return true;
         }
 
@@ -679,7 +687,7 @@ class observer {
                                                                 'courseid' => $courseid,
                                                                 'timecompleted' => null))) {
             // We already have an entry.  Remove it.
-            $DB->set_field('local_iomad_track', 'finalscore', $graderec->finalgrade/$graderec->rawgrademax * 100, array('id' => $entry->id));
+            $DB->set_field('local_iomad_track', 'finalscore', $finalgrade, array('id' => $entry->id));
             $DB->set_field('local_iomad_track', 'modifiedtime', $event->timecreated, array('id' => $entry->id));
         }
 

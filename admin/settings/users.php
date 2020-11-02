@@ -186,6 +186,7 @@ if ($hassiteconfig
                              'email' => new lang_string('email'),
                              'city' => new lang_string('city'),
                              'country' => new lang_string('country'),
+                             'moodlenetprofile' => new lang_string('moodlenetprofile', 'user'),
                              'timezone' => new lang_string('timezone'),
                              'webpage' => new lang_string('webpage'),
                              'icqnumber' => new lang_string('icqnumber'),
@@ -209,7 +210,7 @@ if ($hassiteconfig
         // Custom user profile fields are not currently supported.
         $temp->add(new admin_setting_configmulticheckbox('showuseridentity',
                 new lang_string('showuseridentity', 'admin'),
-                new lang_string('showuseridentity_desc', 'admin'), array('email' => 1), array(
+                new lang_string('showuseridentity_desc', 'admin'), array('email' => 1, 'department' => 1), array(
                     'username'    => new lang_string('username'),
                     'idnumber'    => new lang_string('idnumber'),
                     'email'       => new lang_string('email'),

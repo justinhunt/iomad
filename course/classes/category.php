@@ -176,6 +176,24 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
     }
 
     /**
+     * Get list of plugin callback functions.
+     *
+     * @param string $name Callback function name.
+     * @return [callable] $pluginfunctions
+     */
+    public function get_plugins_callback_function(string $name) : array {
+        $pluginfunctions = [];
+        if ($pluginsfunction = get_plugins_with_function($name)) {
+            foreach ($pluginsfunction as $plugintype => $plugins) {
+                foreach ($plugins as $pluginfunction) {
+                    $pluginfunctions[] = $pluginfunction;
+                }
+            }
+        }
+        return $pluginfunctions;
+    }
+
+    /**
      * Create an iterator because magic vars can't be seen by 'foreach'.
      *
      * implementing method from interface IteratorAggregate
@@ -714,70 +732,64 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
      * 0 - array of ids of top-level categories (always present)
      * '0i' - array of ids of top-level categories that have visible=0 (always present but may be empty array)
      * $id (int) - array of ids of categories that are direct children of category with id $id. If
-     *   category with id $id does not exist returns false. If category has no children returns empty array
+     *   category with id $id does not exist, or category has no children, returns empty array
      * $id.'i' - array of ids of children categories that have visible=0
      *
      * @param int|string $id
      * @return mixed
      */
     protected static function get_tree($id) {
-        global $DB, $USER;
 
-        $companyid = iomad::get_my_companyid(context_system::instance(), false);
-
-        // IOMAD: Needed to make changes for the count.
-        $coursecattreecache = cache::make('core', 'coursecattree');
-        $rv = $coursecattreecache->get($id);
-        if (iomad::has_capability('block/iomad_company_admin:company_view_all', context_system::instance()) && $rv !== false) {
-            return $rv;
+        // IOMAD Need to filter here.
+        $all = self::get_cached_cat_tree();
+        if (is_null($all) || !isset($all[$id])) {
+            // Could not get or rebuild the tree, or requested a non-existant ID.
+            return [];
+        } else {
+            return $all[$id];
         }
+    }
 
-        $allowedcategories = $DB->get_records_sql("SELECT id FROM {course_categories}
-                                                   WHERE parent = 0
-                                                   AND id NOT IN (
-                                                    SELECT category FROM {company}
-                                                    WHERE id != :companyid
-                                                   )", array('companyid' => $companyid));
-        $allowedcategories = array_keys($allowedcategories);
-
+    /**
+     * Return the course category tree.
+     *
+     * Returns the category tree array, from the cache if available or rebuilding the cache
+     * if required. Uses locking to prevent the cache being rebuilt by multiple requests at once.
+     *
+     * @return array|null The tree as an array, or null if rebuilding the tree failed due to a lock timeout.
+     * @throws coding_exception
+     * @throws dml_exception
+     * @throws moodle_exception
+     */
+    private static function get_cached_cat_tree() : ?array {
+        // IOMAD Need to filter here.
+        $coursecattreecache = cache::make('core', 'coursecattree');
+        $all = $coursecattreecache->get('all');
+        if ($all !== false) {
+            return $all;
+        }
         // Might need to rebuild the tree. Put a lock in place to ensure other requests don't try and do this in parallel.
         $lockfactory = \core\lock\lock_config::get_lock_factory('core_coursecattree');
         $lock = $lockfactory->get_lock('core_coursecattree_cache',
                 course_modinfo::COURSE_CACHE_LOCK_WAIT, course_modinfo::COURSE_CACHE_LOCK_EXPIRY);
         if ($lock === false) {
             // Couldn't get a lock to rebuild the tree.
-            return [];
+            return null;
         }
-        $rv = $coursecattreecache->get($id);
-        if ($rv !== false) {
+        $all = $coursecattreecache->get('all');
+        if ($all !== false) {
             // Tree was built while we were waiting for the lock.
             $lock->release();
-            if ($id === 0) {
-                return($allowedcategories);
-            }
-            if (!in_array($id, $allowedcategories)) {
-                return [];
-            }
-
-            return $rv;
+            return $all;
         }
-
         // Re-build the tree.
         try {
             $all = self::rebuild_coursecattree_cache_contents();
-            $coursecattreecache->set_many($all);
+            $coursecattreecache->set('all', $all);
         } finally {
             $lock->release();
         }
-        if ($id === 0) {
-            return($allowedcategories);
-        }
-        if (!in_array($id, $allowedcategories)) {
-            return [];
-        }
-
-        // Requested non-existing category.
-        return array();
+        return $all;
     }
 
     /**
@@ -1416,7 +1428,7 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
         while (count($walk) > 0) {
             $catid = array_pop($walk);
             $directchildren = self::get_tree($catid);
-            if ($directchildren !== false && count($directchildren) > 0) {
+            if (count($directchildren) > 0) {
                 $walk = array_merge($walk, $directchildren);
                 $children = array_merge($children, $directchildren);
             }
@@ -1622,6 +1634,10 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
                     //if (!empty($records[$id])) {
                         $courses[$id] = new core_course_list_element($records[$id]);
                     //}
+                    // If a course is deleted after we got the cache entry it may not exist in the database anymore.
+                    if (!empty($records[$id])) {
+                        $courses[$id] = new core_course_list_element($records[$id]);
+                    }
                 }
             }
 
@@ -1849,6 +1865,7 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
                 foreach ($ids as $id) {
 
                     //IOMAD strip out unwanted courses.
+
                     // If a course is deleted after we got the cache entry it may not exist in the database anymore.
                     if (!empty($records[$id])) {
                         $courses[$id] = new core_course_list_element($records[$id]);
@@ -1960,13 +1977,12 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
             return false;
         }
 
-        $context = $this->get_context();
-        if (!$this->is_uservisible() ||
-                !has_capability('moodle/category:manage', $context)) {
+        if (!$this->has_manage_capability()) {
             return false;
         }
 
         // Check all child categories (not only direct children).
+        $context = $this->get_context();
         $sql = context_helper::get_preload_record_columns_sql('ctx');
         $childcategories = $DB->get_records_sql('SELECT c.id, c.visible, '. $sql.
             ' FROM {context} ctx '.
@@ -1996,6 +2012,15 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
             }
         }
 
+        // Check if plugins permit deletion of category content.
+        $pluginfunctions = $this->get_plugins_callback_function('can_course_category_delete');
+        foreach ($pluginfunctions as $pluginfunction) {
+            // If at least one plugin does not permit deletion, stop and return false.
+            if (!$pluginfunction($this)) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -2021,13 +2046,9 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
         $settimeout = core_php_time_limit::raise();
 
         // Allow plugins to use this category before we completely delete it.
-        if ($pluginsfunction = get_plugins_with_function('pre_course_category_delete')) {
-            $category = $this->get_db_record();
-            foreach ($pluginsfunction as $plugintype => $plugins) {
-                foreach ($plugins as $pluginfunction) {
-                    $pluginfunction($category);
-                }
-            }
+        $pluginfunctions = $this->get_plugins_callback_function('pre_course_category_delete');
+        foreach ($pluginfunctions as $pluginfunction) {
+            $pluginfunction($this->get_db_record());
         }
 
         $deletedcourses = array();
@@ -2053,7 +2074,11 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
 
         // Now delete anything that may depend on course category context.
         grade_course_category_delete($this->id, 0, $showfeedback);
-        if (!question_delete_course_category($this, 0, $showfeedback)) {
+        $cb = new \core_contentbank\contentbank();
+        if (!$cb->delete_contents($this->get_context())) {
+            throw new moodle_exception('errordeletingcontentfromcategory', 'contentbank', '', $this->get_formatted_name());
+        }
+        if (!question_delete_course_category($this, null)) {
             throw new moodle_exception('cannotdeletecategoryquestions', '', '', $this->get_formatted_name());
         }
 
@@ -2132,25 +2157,35 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
     public function can_move_content_to($newcatid) {
         global $CFG;
         require_once($CFG->libdir . '/questionlib.php');
-        $context = $this->get_context();
-        if (!$this->is_uservisible() ||
-                !has_capability('moodle/category:manage', $context)) {
+
+        if (!$this->has_manage_capability()) {
             return false;
         }
+
         $testcaps = array();
         // If this category has courses in it, user must have 'course:create' capability in target category.
         if ($this->has_courses()) {
             $testcaps[] = 'moodle/course:create';
         }
         // If this category has subcategories or questions, user must have 'category:manage' capability in target category.
-        if ($this->has_children() || question_context_has_any_questions($context)) {
+        if ($this->has_children() || question_context_has_any_questions($this->get_context())) {
             $testcaps[] = 'moodle/category:manage';
         }
-        if (!empty($testcaps)) {
-            return has_all_capabilities($testcaps, context_coursecat::instance($newcatid));
+        if (!empty($testcaps) && !has_all_capabilities($testcaps, context_coursecat::instance($newcatid))) {
+            // No sufficient capabilities to perform this task.
+            return false;
         }
 
-        // There is no content but still return true.
+        // Check if plugins permit moving category content.
+        $pluginfunctions = $this->get_plugins_callback_function('can_course_category_delete_move');
+        $newparentcat = self::get($newcatid, MUST_EXIST, true);
+        foreach ($pluginfunctions as $pluginfunction) {
+            // If at least one plugin does not permit move on deletion, stop and return false.
+            if (!$pluginfunction($this, $newparentcat)) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -2179,6 +2214,12 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
         $params = array('category' => $this->id);
         $coursesids = $DB->get_fieldset_select('course', 'id', 'category = :category ORDER BY sortorder ASC', $params);
         $context = $this->get_context();
+
+        // Allow plugins to make necessary changes before we move the category content.
+        $pluginfunctions = $this->get_plugins_callback_function('pre_course_category_delete_move');
+        foreach ($pluginfunctions as $pluginfunction) {
+            $pluginfunction($this, $newparentcat);
+        }
 
         if ($children) {
             foreach ($children as $childcat) {
@@ -2213,7 +2254,20 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
 
         // Now delete anything that may depend on course category context.
         grade_course_category_delete($this->id, $newparentid, $showfeedback);
-        if (!question_delete_course_category($this, $newparentcat, $showfeedback)) {
+        $cb = new \core_contentbank\contentbank();
+        $newparentcontext = context_coursecat::instance($newparentid);
+        $result = $cb->move_contents($context, $newparentcontext);
+        if ($showfeedback) {
+            if ($result) {
+                echo $OUTPUT->notification(get_string('contentsmoved', 'contentbank', $catname), 'notifysuccess');
+            } else {
+                echo $OUTPUT->notification(
+                        get_string('errordeletingcontentbankfromcategory', 'contentbank', $catname),
+                        'notifysuccess'
+                );
+            }
+        }
+        if (!question_delete_course_category($this, $newparentcat)) {
             if ($showfeedback) {
                 echo $OUTPUT->notification(get_string('errordeletingquestionsfromcategory', 'question', $catname), 'notifysuccess');
             }
@@ -2229,7 +2283,7 @@ class core_course_category implements renderable, cacheable_object, IteratorAggr
         $event = \core\event\course_category_deleted::create(array(
             'objectid' => $this->id,
             'context' => $context,
-            'other' => array('name' => $this->name)
+            'other' => array('name' => $this->name, 'contentmovedcategoryid' => $newparentid)
         ));
         $event->set_coursecat($this);
         $event->trigger();

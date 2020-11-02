@@ -66,6 +66,8 @@ class block_iomad_company_admin extends block_base {
     private function get_menu() {
         $menus = [];
         $plugins = get_plugins_with_function('menu', $file = 'db/iomadmenu.php', $include = true);
+        unset($plugins['block']['iomad_company_admin']);
+        $plugins['block'] = array('iomad_company_admin' => 'block_iomad_company_admin_menu') + $plugins['block'];
         foreach ($plugins as $plugintype) {
             foreach ($plugintype as $plugin => $menufunction) {
                 $menus += $menufunction();
@@ -123,12 +125,6 @@ class block_iomad_company_admin extends block_base {
     public function get_content() {
         global $OUTPUT, $CFG, $SESSION, $USER;
 
-//POODLL NET only admins see ths block
-$context = context_system::instance();
-if(!has_capability
-('block/poodllclassroom:manageintegration',$context)){
-return null;
-}
         // Deal with Access approval notifications.
         require_once($CFG->dirroot . '/blocks/iomad_approve_access/lib.php');
         if (approve_enrol_has_users() && empty($SESSION->approveaccesswarningshown)) {

@@ -22,6 +22,8 @@ function xmldb_local_iomad_track_upgrade($oldversion) {
     $result = true;
     $dbman = $DB->get_manager();
 
+    require_once($CFG->dirroot.'/local/iomad_track/lib.php');
+
     if ($oldversion < 2017080800) {
 
         // Changing type of field finalscore on table local_iomad_track to number.
@@ -479,7 +481,6 @@ mtrace("enrol end " . time());
         $task = new local_iomad_track\task\fixtracklicensetask();
         \core\task\manager::queue_adhoc_task($task, true);
 
-
         // Iomad_track savepoint reached.
         upgrade_plugin_savepoint(true, 2020010201, 'local', 'iomad_track');
     }
@@ -607,6 +608,44 @@ mtrace("enrol end " . time());
 
         // Iomad_track savepoint reached.
         upgrade_plugin_savepoint(true, 2020051900, 'local', 'iomad_track');
+    }
+
+    if ($oldversion < 2020062900) {
+
+        // Remove the certificates which have been recorded erroneously / with no timecompleted
+        $brokentracks = $DB->get_records_sql("SELECT lit.* FROM {local_iomad_track} lit
+                                              JOIN {local_iomad_track_certs} litc
+                                              ON (lit.id = litc.trackid)
+                                              WHERE lit.timecompleted IS NULL");
+        foreach ($brokentracks as $brokentrack) {
+            // Remove the file
+            local_iomad_track_delete_entry($brokentrack->id);
+        }
+
+        // Iomad_track savepoint reached.
+        upgrade_plugin_savepoint(true, 2020062900, 'local', 'iomad_track');
+    }
+
+    if ($oldversion < 2020092800) {
+
+        // Define field coursecleared to be added to local_iomad_track.
+        $table = new xmldb_table('local_iomad_track');
+        $field = new xmldb_field('coursecleared', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'expiredstop');
+
+        // Conditionally launch add field coursecleared.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Deal with all of the previous data.
+        require_once(dirname(__FILE__) . '/../classes/task/fixcourseclearedtask.php');
+
+        // Fire off the adhoc task to populate this new field correctly.
+        $task = new local_iomad_track\task\fixcourseclearedtask();
+        \core\task\manager::queue_adhoc_task($task, true);
+
+        // Iomad_track savepoint reached.
+        upgrade_plugin_savepoint(true, 2020092800, 'local', 'iomad_track');
     }
 
    return $result;

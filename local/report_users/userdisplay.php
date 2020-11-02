@@ -31,7 +31,13 @@ $rowid = optional_param('rowid', 0, PARAM_INT);
 $action = optional_param('action', '', PARAM_CLEAN);
 $confirm = optional_param('confirm', 0, PARAM_INT);
 $validonly = optional_param('validonly', $CFG->iomad_hidevalidcourses, PARAM_BOOL);
+/*$revoke = false;
 
+if ($action == 'revoke') {
+    $revoke = true;
+    $action = 'delete';
+}
+*/
 $params = array();
 $params['userid'] = $userid;
 $params['validonly'] = $validonly;
@@ -104,7 +110,9 @@ if (!empty($action)) {
         $cancel = new moodle_url('/local/report_users/userdisplay.php',
                                  array('userid' => $userid));
         if ($action == 'delete') {
-            echo $OUTPUT->confirm(get_string('deleteconfirm', 'local_report_users'), $confirmurl, $cancel);
+            echo $OUTPUT->confirm(get_string('resetcourseconfirm', 'local_report_users'), $confirmurl, $cancel);
+        } else if ($action == 'revoke') {
+            echo $OUTPUT->confirm(get_string('revokeconfirm', 'local_report_users'), $confirmurl, $cancel);
         } else if ($action == 'clear') {
             if (empty($CFG->iomad_autoreallocate_licenses)) {
                 echo $OUTPUT->confirm(get_string('clearconfirm', 'local_report_users'), $confirmurl, $cancel);
@@ -113,7 +121,7 @@ if (!empty($action)) {
             }
         } else if ($action == 'trackonly') {
             // We are only removing the saved record for this.
-            echo $OUTPUT->confirm(get_string('trackclearconfirm', 'local_report_users'), $confirmurl, $cancel);
+            echo $OUTPUT->confirm(get_string('purgerecordconfirm', 'local_report_users'), $confirmurl, $cancel);
         }
         echo $OUTPUT->footer();
         die;
@@ -182,13 +190,13 @@ if (!$table->is_downloading()) {
 }
 
 // Set up the initial SQL for the form.
-$selectsql = "lit.id,lit.userid,lit.courseid,lit.coursename,lit.licenseid,lit.licensename,lit.licenseallocated,lit.timeenrolled,lit.timestarted,lit.timecompleted,lit.timeexpires,lit.finalscore,lit.id as certsource, cc.timecompleted AS action";
-$fromsql = "{local_iomad_track} lit LEFT JOIN {course_completions} cc ON (lit.courseid = cc.course AND lit.userid = cc.userid AND lit.timecompleted = cc.timecompleted AND lit.timecompleted IS NOT NULL)";
+$selectsql = "lit.id,lit.userid,lit.courseid,lit.coursename,lit.licenseid,lit.licensename,lit.licenseallocated,lit.timeenrolled,lit.timestarted,lit.timecompleted,lit.timeexpires,lit.finalscore,lit.id as certsource,lit.coursecleared";
+$fromsql = "{local_iomad_track} lit ";
 $sqlparams = array('userid' => $userid, 'companyid' => $companyid);
 
 // Just valid courses?
 if ($validonly) {
-    $validsql = " AND (lit.timeexpires > :runtime || (lit.timecompleted IS NULL) || (lit.timecompleted > 0 AND lit.timeexpires IS NULL))";
+    $validsql = " AND (lit.timeexpires > :runtime or (lit.timecompleted IS NULL) or (lit.timecompleted > 0 AND lit.timeexpires IS NULL))";
     $sqlparams['runtime'] = time();
 } else {
     $validsql = "";

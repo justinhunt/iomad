@@ -362,6 +362,10 @@ function default_exception_handler($ex) {
 
     $info = get_exception_info($ex);
 
+    // If we already tried to send the header remove it, the content length
+    // should be either empty or the length of the error page.
+    @header_remove('Content-Length');
+
     if (is_early_init($info->backtrace)) {
         echo bootstrap_renderer::early_error($info->message, $info->moreinfourl, $info->link, $info->backtrace, $info->debuginfo, $info->errorcode);
     } else {
@@ -824,8 +828,20 @@ function initialise_fullme() {
     // IOMAD - Set the theme if the server hostname matches one of ours.
     if(!CLI_SCRIPT && !during_initial_install()){
         $CFG->wwwrootdefault = $CFG->wwwroot;
+
+        // Does this match a company hostname?
         if ($company = $DB->get_record('company', array('hostname' => $_SERVER['SERVER_NAME']))) {
-            $CFG->wwwroot   = $_SERVER['REQUEST_SCHEME'] . "://" . $_SERVER["SERVER_NAME"];
+
+            // What HTTP Protocol are we using?
+            if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+                || $_SERVER['SERVER_PORT'] == 443) {
+                $httpprotocol = "https";
+            } else {
+                $httpprotocol = "http";
+            }
+
+            // Set the wwwroot to the company one using the same protocol.
+            $CFG->wwwroot   = $httpprotocol . "://" . $_SERVER["SERVER_NAME"];
 
         }
     }

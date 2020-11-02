@@ -807,6 +807,18 @@ class company_user {
                 }
             }
 
+            // Deal with H5P Activity.
+            if ($h5ps = $DB->get_records('h5pactivity', array('course' => $courseid))) {
+                foreach ($h5ps as $h5p) {
+                    if ($attempts = $DB->get_records('h5pactivity_attempts', array('userid' => $userid, 'h5pactivityid' => $h5p->id))) {
+                        foreach ($attempts as $attempt) {
+                            $DB->delete_records('h5pactivity_attempts_results', array('attemptid' => $attempt->id));
+                            $DB->delete_records('h5pactivity_attempts', array('id' => $attempt->id));
+                        }
+                    }
+                }
+            }
+
             // Remove grades
             if ($items = $DB->get_records('grade_items', array('courseid' => $courseid))) {
                 foreach ($items as $item) {
@@ -855,6 +867,11 @@ class company_user {
                                  'userid' =>$userid,
                                  'isusing' => 1,
                                  'timecompleted' => null);
+            } else if ($action == 'revoke') {
+                // If this is being called from the course expiry event then the parameters are slightly different.
+                $params =  array('licensecourseid' => $courseid,
+                                 'userid' =>$userid,
+                                 'isusing' => 0);
             } else {
                 $params =  array('licensecourseid' => $courseid,
                                  'userid' =>$userid,
@@ -862,10 +879,11 @@ class company_user {
             }
 
             // Deal with Iomad track table stuff.
-            if ($action == 'delete') {
+            if ($action == 'delete' || $action == 'revoke') {
                 $DB->delete_records('local_iomad_track', array('userid' => $userid, 'courseid' => $courseid, 'timecompleted' => null));
+            } else {
+                $DB->set_field('local_iomad_track', 'coursecleared', 1, array('userid' => $userid, 'courseid' => $courseid));
             }
-
             // Fix company licenses
             if ($licenses = $DB->get_records('companylicense_users', $params)) {
                 $license = array_pop($licenses);
@@ -927,7 +945,7 @@ class company_user {
                         }
                     }
                 }
-                if ($action == 'delete') {
+                if ($action == 'delete' || $action == 'revoke') {
                     if ($license->isusing == 0) {
                         $DB->delete_records('companylicense_users', array('id' => $license->id));
                         company::update_license_usage($license->id);
