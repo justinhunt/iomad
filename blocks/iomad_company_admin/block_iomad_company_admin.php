@@ -132,6 +132,12 @@ class block_iomad_company_admin extends block_base {
            $SESSION->approveaccesswarningshown = true;
         }
 
+        //POODLL_NET
+        $context = context_system::instance();
+        if (!iomad::has_capability('block/iomad_company_admin:company_add', $context)) {
+            return $this->content;
+        }
+        
         // TODO: Really need a cap check to prevent it being displayed at all.
 
         if ($this->content !== null) {
